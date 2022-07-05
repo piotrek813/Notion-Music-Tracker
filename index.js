@@ -12,11 +12,18 @@ const getQueryStrFromCmd= (cmd) => {
     return cmd.slice(0,-1).split('[');
 }
 
-const fetchAlbumData = async ([albumQ="", bandQ=""]) => {
+const fetchAlbumData = async (params) => {
+    // this is full ajax query from metal archives
     // search/ajax-advanced/searching/albums/?bandName=Invicta&releaseTitle=The+Executioner&releaseYearFrom=&releaseMonthFrom=&releaseYearTo=&releaseMonthTo=&country=&location=&releaseLabelName=&releaseCatalogNumber=&releaseIdentifiers=&releaseRecordingInfo=&releaseDescription=&releaseNotes=&genre=
-    // const maQuery = await fetch(`https://www.metal-archives.com/search/ajax-album-search/?field=title&query=${album}`);
 
-    const maQuery = await fetch(`https://www.metal-archives.com/search/ajax-advanced/searching/albums/?bandName=${bandQ}&releaseTitle=${albumQ}`);
+    // Okay so notion's devs or designers thought that this ‘ looks better than normal ' and that's why this...
+    const [albumParamValue, bandParamValue] = params.map(param => {
+        if(!param) return "";
+        if(!isNaN(param)) return param;
+        return param.replace(/[\u2018\u2019]/g, "'");
+    })
+console.log(albumParamValue,bandParamValue);
+    const maQuery = await fetch(`https://www.metal-archives.com/search/ajax-advanced/searching/albums/?bandName=${bandParamValue}&releaseTitle=${albumParamValue}`);
     const maResult = await maQuery.json()
     if(maResult.aaData.length === 0) return;
     const bandPageLink = maResult.aaData[0][0].split('"')[1];
@@ -37,11 +44,12 @@ const fetchAlbumData = async ([albumQ="", bandQ=""]) => {
     albumReleaseDate = albumReleaseDate.substring(0, albumReleaseDate.indexOf('T'))
 
     const bandName = albumPageDOM.window.document.querySelector("#album_info > h2 > a").textContent;
+    const albumTitle = albumPageDOM.window.document.querySelector("#album_info > h1 > a").textContent;
 
     const albumCover = albumPageDOM.window.document.querySelector("#cover > img").src;
 
     return {
-        bandGenere,bandName,albumCover,albumReleaseDate
+        albumTitle, bandGenere,bandName,albumCover,albumReleaseDate
     }
 }
 
@@ -71,7 +79,8 @@ const updatePage = async (page) => {
         },
     });
 
-    const {bandGenere, bandName, albumCover, albumReleaseDate} = albumData;
+    const {albumTitle, bandGenere, bandName, albumCover, albumReleaseDate} = albumData;
+
     await notion.pages.update({
         page_id: page.id,
         cover: {
@@ -85,7 +94,7 @@ const updatePage = async (page) => {
                 title: [
                     {
                         text: {
-                            content: cmds[0],
+                            content: albumTitle,
                         }
                     }
                 ]
