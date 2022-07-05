@@ -8,9 +8,17 @@ const sleep = require('./utils/sleep');
 const jsdom = require("jsdom");
 const { JSDOM } = jsdom;
 
-const fetchAlbumData = async (album) => {
-    const maQuery = await fetch(`https://www.metal-archives.com/search/ajax-album-search/?field=title&query=${album}`);
+const getQueryStrFromCmd= (cmd) => {
+    return cmd.slice(0,-1).split('[');
+}
+
+const fetchAlbumData = async ([albumQ="", bandQ=""]) => {
+    // search/ajax-advanced/searching/albums/?bandName=Invicta&releaseTitle=The+Executioner&releaseYearFrom=&releaseMonthFrom=&releaseYearTo=&releaseMonthTo=&country=&location=&releaseLabelName=&releaseCatalogNumber=&releaseIdentifiers=&releaseRecordingInfo=&releaseDescription=&releaseNotes=&genre=
+    // const maQuery = await fetch(`https://www.metal-archives.com/search/ajax-album-search/?field=title&query=${album}`);
+
+    const maQuery = await fetch(`https://www.metal-archives.com/search/ajax-advanced/searching/albums/?bandName=${bandQ}&releaseTitle=${albumQ}`);
     const maResult = await maQuery.json()
+    if(maResult.aaData.length === 0) return;
     const bandPageLink = maResult.aaData[0][0].split('"')[1];
     const albumPageLink = maResult.aaData[0][1].split('"')[1];
 
@@ -38,12 +46,33 @@ const fetchAlbumData = async (album) => {
 }
 
 const updatePage = async (page) => {
-    const cmd = page.properties.Name.title[0].text.content;
-    const albumTitle = cmd.slice(0,-1);
+    const cmdStr = page.properties.Name.title[0].text.content;
+    const cmds = getQueryStrFromCmd(cmdStr);
 
-    const {bandGenere, bandName, albumCover, albumReleaseDate} = await fetchAlbumData(albumTitle);
+    const albumData = await fetchAlbumData(cmds);
+    if(!albumData) return await notion.pages.update({
+        page_id: page.id,
+        cover: {
+            type: "external",
+            external: {
+                url: 'https://images.unsplash.com/photo-1600754047212-0cf91397fbc6?ixlib=rb-1.2.1&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=1074&q=80'
+            }
+        },
+        properties: {
+            Name: {
+                title: [
+                    {
+                        text: {
+                            content: "!Error No Data Found",
+                        }
+                    }
+                ]
+            },
+        },
+    });
 
-    const response = await notion.pages.update({
+    const {bandGenere, bandName, albumCover, albumReleaseDate} = albumData;
+    await notion.pages.update({
         page_id: page.id,
         cover: {
             type: "external",
@@ -56,7 +85,7 @@ const updatePage = async (page) => {
                 title: [
                     {
                         text: {
-                            content: albumTitle,
+                            content: cmds[0],
                         }
                     }
                 ]
@@ -79,7 +108,7 @@ const updatePage = async (page) => {
 
 const notionQuery = async () => {
     try {
-        const databaseId = 'f43649e7c1c747e3929080854b6e2a8f';
+        const databaseId = process.env.NOTION_DATABASE_ID;
         const response = await notion.databases.query({
             database_id: databaseId,
             filter: {
