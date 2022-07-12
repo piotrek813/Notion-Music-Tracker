@@ -1,120 +1,75 @@
-const fetch = require('node-fetch');
-
 const notion = require('./utils/notion');
-const { APIErrorCode } = require("@notionhq/client");
+// const { APIErrorCode } = require("@notionhq/client");
 
 const sleep = require('./utils/sleep');
+const {sendError, NOT_FOUND} = require('./utils/sendError');
 
-const jsdom = require("jsdom");
-const { JSDOM } = jsdom;
-
-const getQueryStrFromCmd= (cmd) => {
-    return cmd.slice(0,-1).split('[');
-}
-
-const fetchAlbumData = async (params) => {
-    // this is full ajax query from metal archives
-    // search/ajax-advanced/searching/albums/?bandName=Invicta&releaseTitle=The+Executioner&releaseYearFrom=&releaseMonthFrom=&releaseYearTo=&releaseMonthTo=&country=&location=&releaseLabelName=&releaseCatalogNumber=&releaseIdentifiers=&releaseRecordingInfo=&releaseDescription=&releaseNotes=&genre=
-
-    // Okay so notion's devs or designers thought that this ‘ looks better than normal ' and that's why this...
-    const [albumParamValue, bandParamValue] = params.map(param => {
-        if(!param) return "";
-        if(!isNaN(param)) return param;
-        return param.replace(/[\u2018\u2019]/g, "'");
-    })
-console.log(albumParamValue,bandParamValue);
-    const maQuery = await fetch(`https://www.metal-archives.com/search/ajax-advanced/searching/albums/?bandName=${bandParamValue}&releaseTitle=${albumParamValue}`);
-    const maResult = await maQuery.json()
-    if(maResult.aaData.length === 0) return;
-    const bandPageLink = maResult.aaData[0][0].split('"')[1];
-    const albumPageLink = maResult.aaData[0][1].split('"')[1];
-
-    const bandPage = await fetch(bandPageLink);
-    const bandPageBody = await bandPage.text();
-    const bandPageDOM = new JSDOM(bandPageBody);
-
-    const bandGenere = bandPageDOM.window.document.querySelector("#band_stats > dl.float_right > dd:nth-child(2)").textContent;
-
-    const albumPage = await fetch(albumPageLink);
-    const albumPageBody = await albumPage.text();
-    const albumPageDOM = new JSDOM(albumPageBody);
-
-    let albumReleaseDate = albumPageDOM.window.document.querySelector("#album_info > dl.float_left > dd:nth-child(4)").textContent;
-    albumReleaseDate = new Date(albumReleaseDate.replace(/(\d+)(st|nd|rd|th|,)/, "")).toISOString();
-    albumReleaseDate = albumReleaseDate.substring(0, albumReleaseDate.indexOf('T'))
-
-    const bandName = albumPageDOM.window.document.querySelector("#album_info > h2 > a").textContent;
-    const albumTitle = albumPageDOM.window.document.querySelector("#album_info > h1 > a").textContent;
-
-    const albumCover = albumPageDOM.window.document.querySelector("#cover > img").src;
-
-    return {
-        albumTitle, bandGenere,bandName,albumCover,albumReleaseDate
-    }
-}
+const fetchAlbumDataMA = require('./utils/fetchAlbumDataMA');
+const fetchAlbumDataDiscogs = require('./utils/fetchAlbumDataDiscogs');
+const extractParams = require('./utils/extractParams');
 
 const updatePage = async (page) => {
-    const cmdStr = page.properties.Name.title[0].text.content;
-    const cmds = getQueryStrFromCmd(cmdStr);
+    const {source, ...params} = extractParams(page.properties.Name.title[0].text.content)
+    let album;
+    console.log(source, params);
+    switch (source) {
+        case 'metal-archives':
+            album = await fetchAlbumDataMA(params)
+            break;
 
-    const albumData = await fetchAlbumData(cmds);
-    if(!albumData) return await notion.pages.update({
-        page_id: page.id,
-        cover: {
-            type: "external",
-            external: {
-                url: 'https://images.unsplash.com/photo-1600754047212-0cf91397fbc6?ixlib=rb-1.2.1&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=1074&q=80'
-            }
-        },
-        properties: {
-            Name: {
-                title: [
-                    {
-                        text: {
-                            content: "!Error No Data Found",
-                        }
-                    }
-                ]
-            },
-        },
-    });
+        default:
+            album = await fetchAlbumDataDiscogs(params);
+            break;
+    }
 
-    const {albumTitle, bandGenere, bandName, albumCover, albumReleaseDate} = albumData;
-
+    if(!album || !album.title) return await sendError(page, NOT_FOUND, false);
     await notion.pages.update({
         page_id: page.id,
-        cover: {
-            type: "external",
-            external: {
-                url: albumCover,
-            }
-        },
+        ...(
+            album.cover &&
+            {cover: {
+                type: "external",
+                external: {
+                    url: album.cover,
+                }
+            }}
+        ),
         properties: {
             Name: {
                 title: [
                     {
                         text: {
-                            content: albumTitle,
+                            content: album.title,
                         }
                     }
                 ]
             },
-            Artist: {
-                multi_select: [
-                    {
-                        name: bandName,
+            ...(
+                album.artists &&
+                {Artist: {
+                    multi_select: album.artists
+                }}
+            ),
+            ...(
+                album.geners &&
+                {Genere: {
+                    multi_select: album.generes
+                }}
+            ),
+            ...(
+                album.released &&
+                {"Release date": {
+                    date: {
+                        start: album.released
                     }
-                ]
-            },
-            "Release date": {
-                date: {
-                    start: albumReleaseDate
-                }
-            }
-        },
+                }}
+            )
+        }
     });
 }
 
+
+// Listen for changes
 const notionQuery = async () => {
     try {
         const databaseId = process.env.NOTION_DATABASE_ID;
@@ -130,20 +85,21 @@ const notionQuery = async () => {
 
         if(response.results.length !== 0) await updatePage(response.results[0]);
     } catch(err) {
-        if(err.code === APIErrorCode.ConflictError) {
-            console.log(err.code)
-            console.log('waitng...');
-            await sleep(500);
-            await notionQuery();
-        }
-        else {
-            console.log(err, err.code)
-        }
+        console.error(err);
+        // in this particular example I don't think I have to leave it here
+        // if(err.code === APIErrorCode.ConflictError) {
+        //     console.log(err.code)
+        //     console.log('waitng...');
+        //     await sleep(500);
+        //     await notionQuery();
+        // }
+        // else {
+        //     console.log(err, err.code)
+        // }
     }
 }
-notionQuery();
-setInterval(async () => {
-    console.log('listening...')
-    await notionQuery()
-    // lastRunCheck = new Date().toISOString();
-}, 1000);
+
+setInterval(() => {
+    console.log('listening...');
+    notionQuery();
+}, 1500);
