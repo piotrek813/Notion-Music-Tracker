@@ -21,8 +21,8 @@ module.exports = async ({album,band}) => {
     const bandPageBody = await bandPage.text();
     const bandPageDOM = new JSDOM(bandPageBody);
 
-    let bandGeneres = bandPageDOM.window.document.querySelector("#band_stats > dl.float_right > dd:nth-child(2)").textContent.split(';');
-    if (bandGeneres.length === 1) bandGeneres = bandGeneres[0].replace('/', ' ').split(' ').map(genere => ({name: genere}));
+    let bandGenres = bandPageDOM.window.document.querySelector("#band_stats > dl.float_right > dd:nth-child(2)").textContent.split(';');
+    if (bandGenres.length === 1) bandGenres = bandGenres[0].replace('/', ' ').split(' ').map(genere => ({name: genere}));
     else bandGenere = undefined;
 
     const albumPage = await fetch(albumPageLink);
@@ -38,6 +38,6 @@ module.exports = async ({album,band}) => {
 
     const albumCover = albumPageDOM.window.document.querySelector("#cover > img").src;
     return {
-        title: albumTitle, generes: bandGeneres, artists: bandsName,cover:albumCover,released: albumReleaseDate
+        title: albumTitle, genres: bandGenres, artists: bandsName,cover:albumCover,released: albumReleaseDate
     }
 }

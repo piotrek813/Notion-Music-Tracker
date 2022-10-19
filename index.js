@@ -45,15 +45,15 @@ const updatePage = async (page) => {
                 ]
             },
             ...(
-                album.artists &&
-                {Artist: {
-                    multi_select: album.artists
+                album.genres &&
+                {Genres: {
+                    multi_select: album.genres
                 }}
             ),
             ...(
-                album.geners &&
-                {Genere: {
-                    multi_select: album.generes
+                album.artists &&
+                {Artist: {
+                    multi_select: album.artists
                 }}
             ),
             ...(
