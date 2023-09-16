@@ -22,7 +22,7 @@ module.exports = async ({album,band}) => {
     const bandPageDOM = new JSDOM(bandPageBody);
 
     let bandGenres = bandPageDOM.window.document.querySelector("#band_stats > dl.float_right > dd:nth-child(2)").textContent.split(';');
-    if (bandGenres.length === 1) bandGenres = bandGenres[0].replace('/', ' ').split(' ').map(genere => ({name: genere}));
+    if (bandGenres.length === 1) bandGenres = bandGenres[0].replaceAll(/\/|,\s/g, ' ').split(' ').map(genere => ({name: genere}));
     else bandGenere = undefined;
 
     const albumPage = await fetch(albumPageLink);
